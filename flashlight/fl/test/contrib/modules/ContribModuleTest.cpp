@@ -291,7 +291,14 @@ TEST(ModuleTest, StreamingTDSFwd) {
 }
 
 TEST(ModuleTest, SpecAugmentFwd) {
-  SpecAugment specAug(0, 27, 2, 100, 0.2, 2);
+  fl::RawWavSpecAugmentConfig rawConfig = {
+    .useRawWav = false,
+    .nMels = 0,
+    .lowFreq = 0,
+    .highFreq = 0,
+    .sampleRate = 0
+  };
+  SpecAugment specAug(0, 27, 2, 100, 0.2, 2, rawConfig);
   int T = 512, F = 80;
   auto input = Variable(af::randu(T, F), false);
 

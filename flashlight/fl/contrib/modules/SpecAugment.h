@@ -25,7 +25,18 @@ namespace fl {
  * LibriSpeech double (LD)   80        27        2     100       1.0       2
  * Switchboard mild (SM)     40        15        2      70       0.2       2
  * Switchboard strong (SS)   40        27        2      70       0.2       2
+ * 
+ * Raw wave specAug is implemented with the low pass filter, for example
+ * https://www.analog.com/media/en/technical-documentation/dsp-book/dsp_book_Ch16.pdf
  **/
+struct RawWavSpecAugmentConfig {
+  bool useRawWav;
+  int nMels;
+  int lowFreq;
+  int highFreq;
+  int sampleRate;
+};
+
 class SpecAugment : public UnaryModule {
  public:
   enum class MaskingStrategy {
@@ -41,7 +52,9 @@ class SpecAugment : public UnaryModule {
       int tMaskT,
       float tMaskP,
       int nTMask,
-      MaskingStrategy mStrategy = MaskingStrategy::ZERO);
+      RawWavSpecAugmentConfig rawWaveConfig,
+      MaskingStrategy mStrategy = MaskingStrategy::ZERO
+      );
 
   Variable forward(const Variable& input) override;
 
@@ -53,7 +66,12 @@ class SpecAugment : public UnaryModule {
       timeMaskT_,
       timeMaskP_,
       numTimeMask_,
-      maskStrategy_)
+      maskStrategy_,
+      fl::versioned(useRawWav_, 1),
+      fl::versioned(rawWavNMels_, 1),
+      fl::versioned(rawWavLowFreq_, 1),
+      fl::versioned(rawWavHighFreq_, 1),
+      fl::versioned(rawWavSampleRate_, 1))
 
   std::string prettyString() const override;
 
@@ -73,10 +91,24 @@ class SpecAugment : public UnaryModule {
   float timeMaskP_;
   int numTimeMask_;
 
+  // Raw wave input
+  bool useRawWav_{false};
+  int rawWavNMels_{80};
+  int rawWavLowFreq_{0};
+  int rawWavHighFreq_{8000};
+  int rawWavSampleRate_{16000};
+  int ignoredLowPassFilters_;
+  std::vector<float> cutoff_;
+  std::vector<std::shared_ptr<Conv2D>> lowPassFilters_;
+
   std::mt19937 eng_{0};
   MaskingStrategy maskStrategy_;
 
   int generateRandomInt(int low, int high);
+  
+  void rawWavPrecompute();
+
+  af::array lowPassFilter(int freq, af::array wav);
 
   SpecAugment() = default;
 };
@@ -84,3 +116,4 @@ class SpecAugment : public UnaryModule {
 } // namespace fl
 
 CEREAL_REGISTER_TYPE(fl::SpecAugment)
+CEREAL_CLASS_VERSION(fl::SpecAugment, 1)
