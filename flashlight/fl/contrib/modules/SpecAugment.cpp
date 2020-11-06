@@ -133,7 +133,7 @@ Variable SpecAugment::forward(const Variable& input) {
       auto low = generateRandomInt(ignoredLowPassFilters_, rawWavNMels_);
       auto high = generateRandomInt(low, std::min(rawWavNMels_, low + freqMaskF_) + 1); 
       if (high > low) {
-        auto midLowWav = lowPassFilters_[high]->forward(inputForFilter); // todo check view
+        auto midLowWav = lowPassFilters_[high]->forward(inputForFilter); 
         auto lowWav = lowPassFilters_[low]->forward(inputForFilter);
         output = output - fl::moddims(midLowWav - lowWav, input.dims());
       }
