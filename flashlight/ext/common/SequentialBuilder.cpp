@@ -505,8 +505,8 @@ std::shared_ptr<Module> parseLines(
     fl::RawWavSpecAugmentConfig rawConfig = {
       .useRawWav = false,
       .nMels = 0,
-      .lowFreq = 0,
-      .highFreq = 0,
+      .lowFreqHz = 0,
+      .highFreqHz = 0,
       .sampleRate = 0
     };
     return std::make_shared<SpecAugment>(

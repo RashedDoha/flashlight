@@ -32,8 +32,8 @@ namespace fl {
 struct RawWavSpecAugmentConfig {
   bool useRawWav;
   int nMels;
-  int lowFreq;
-  int highFreq;
+  int lowFreqHz;
+  int highFreqHz;
   int sampleRate;
 };
 
@@ -69,8 +69,8 @@ class SpecAugment : public UnaryModule {
       maskStrategy_,
       fl::versioned(useRawWav_, 1),
       fl::versioned(rawWavNMels_, 1),
-      fl::versioned(rawWavLowFreq_, 1),
-      fl::versioned(rawWavHighFreq_, 1),
+      fl::versioned(rawWavLowFreqHz_, 1),
+      fl::versioned(rawWavHighFreqHz_, 1),
       fl::versioned(rawWavSampleRate_, 1))
 
   std::string prettyString() const override;
@@ -91,18 +91,18 @@ class SpecAugment : public UnaryModule {
   float timeMaskP_;
   int numTimeMask_;
 
+  std::mt19937 eng_{0};
+  MaskingStrategy maskStrategy_;
+
   // Raw wave input
   bool useRawWav_{false};
   int rawWavNMels_{80};
-  int rawWavLowFreq_{0};
-  int rawWavHighFreq_{8000};
+  int rawWavLowFreqHz_{0};
+  int rawWavHighFreqHz_{8000};
   int rawWavSampleRate_{16000};
   int ignoredLowPassFilters_;
   std::vector<float> cutoff_;
   std::vector<std::shared_ptr<Conv2D>> lowPassFilters_;
-
-  std::mt19937 eng_{0};
-  MaskingStrategy maskStrategy_;
 
   int generateRandomInt(int low, int high);
   

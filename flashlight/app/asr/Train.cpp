@@ -612,8 +612,8 @@ int main(int argc, char** argv) {
       fl::RawWavSpecAugmentConfig rawConfig = {
         .useRawWav = !(FLAGS_pow && FLAGS_mfsc && FLAGS_mfcc),
         .nMels = (int)FLAGS_filterbanks,
-        .lowFreq = (int)FLAGS_lowfreqfilterbank,
-        .highFreq = (int)FLAGS_highfreqfilterbank,
+        .lowFreqHz = (int)FLAGS_lowfreqfilterbank,
+        .highFreqHz = (int)FLAGS_highfreqfilterbank,
         .sampleRate = (int)FLAGS_samplerate
       };
       saug = std::make_shared<fl::SpecAugment>(

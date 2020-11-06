@@ -32,8 +32,8 @@ SpecAugment::SpecAugment(
       maskStrategy_(mStrategy),
       useRawWav_(rawWaveConfig.useRawWav),
       rawWavNMels_(rawWaveConfig.nMels),
-      rawWavLowFreq_(rawWaveConfig.lowFreq),
-      rawWavHighFreq_(rawWaveConfig.highFreq),
+      rawWavLowFreqHz_(rawWaveConfig.lowFreqHz),
+      rawWavHighFreqHz_(rawWaveConfig.highFreqHz),
       rawWavSampleRate_(rawWaveConfig.sampleRate) {
   if (numFreqMask_ > 0 && freqMaskF_ <= 0) {
     throw std::invalid_argument("invalid arguments for frequency masking.");
@@ -44,7 +44,7 @@ SpecAugment::SpecAugment(
   if (numTimeMask_ > 0 && (timeMaskP_ <= 0 || timeMaskP_ > 1.0)) {
     throw std::invalid_argument("invalid arguments for time masking.");
   }
-  if (useRawWav_ && (rawWavLowFreq_ < 0 || rawWavHighFreq_ < 0 || rawWavLowFreq_ >= rawWavHighFreq_)) {
+  if (useRawWav_ && (rawWavLowFreqHz_ < 0 || rawWavHighFreqHz_ < 0 || rawWavLowFreqHz_ >= rawWavHighFreqHz_)) {
     throw std::invalid_argument("invalid arguments for raw Wav high and low frequencies.");
   }
   if (useRawWav_ && rawWavNMels_ <= 0) {
@@ -61,21 +61,19 @@ void SpecAugment::rawWavPrecompute() {
     auto hz2mel = [](float hz) {
       return 2595.0 * std::log10(1.0 + hz / 700.0);
     };
-    float minMel = hz2mel(rawWavLowFreq_), maxMel = hz2mel(rawWavHighFreq_);
+    float minMel = hz2mel(rawWavLowFreqHz_), maxMel = hz2mel(rawWavHighFreqHz_);
     // nMels intervals and nMels + 1 points
     float delta = (maxMel - minMel) / rawWavNMels_; 
     float currentMel = minMel;
-    float minDeltaFreq = rawWavHighFreq_ - rawWavLowFreq_;
     // set transition band as half of lowest bin frequency size (left bin)
     // for lowest frequency set it to half of the right bin
     // cutoff frequency and transmision band are stored from 0 to 0.5 of sampling rate
     std::vector<float> transBandKhz(rawWavNMels_ + 1);
     for (int index = 0; index <= rawWavNMels_; index++) {
-      // TODO recheck sampling rate used here
       cutoff_.push_back(mel2hz(currentMel) / rawWavSampleRate_);
       currentMel += delta;
       if (index > 0) {
-        transBandKhz[index] = cutoff_[index - 1] / 2.;
+        transBandKhz[index] = cutoff_[index - 1] / 4.;
       }
     }
     transBandKhz[0] = transBandKhz[1];
@@ -84,18 +82,19 @@ void SpecAugment::rawWavPrecompute() {
     for (int fidx = 0; fidx < cutoff_.size(); fidx++) {
       int width = 2. / (1e-6 + transBandKhz[fidx]);
       if (width > 10000) {
+        FL_LOG(fl::INFO) << "SpecAugment raw wave: frequency " << cutoff_[fidx]
+                         << " will be skipped for eval, too large kernel";
         lowPassFilters_.push_back(nullptr);
         ignoredLowPassFilters_++;
       }
       af::array indexArr = af::iota(af::dim4(2 * width + 1));
       af::array blackmanWindow = 
         0.42 - 0.5 * af::cos(M_PI * indexArr / width) + 0.08 * af::cos(2 * M_PI * indexArr / width); 
-      FL_LOG(fl::INFO) << "computed width " << width << " for frequency " << cutoff_[fidx];
       af::array denom = indexArr - width;
       // compute sinc with proper process for index = width
       af::array kernel = af::sin(2 * M_PI * cutoff_[fidx] * (indexArr - width));
       kernel(denom != 0) = kernel(denom != 0) / denom(denom != 0);
-      kernel(denom != 0) = 2 * M_PI * cutoff_[fidx];
+      kernel(denom == 0) = 2 * M_PI * cutoff_[fidx];
       kernel = kernel * blackmanWindow;
       // normalize kernel
       kernel = kernel / af::tile(af::sum(kernel), 2 * width + 1);
@@ -103,7 +102,6 @@ void SpecAugment::rawWavPrecompute() {
       auto filter = std::make_shared<Conv2D>(Variable(kernel, false), 1, 1, PaddingMode::SAME, 0);
       filter->eval();
       lowPassFilters_.push_back(filter);
-      FL_LOG(fl::INFO) << "computed lowpass";
     }
     if (ignoredLowPassFilters_ >= lowPassFilters_.size()) {
       throw std::invalid_argument("All low pass filters are ignored, too huge kernel for all frequencies");
@@ -132,15 +130,11 @@ Variable SpecAugment::forward(const Variable& input) {
     af::dim4 timeView = af::dim4(input.dims(0), input.dims(1) * input.dims(2) * input.dims(3));
     auto inputForFilter = fl::Variable(af::moddims(input.array(), timeView), false);
     for (int i = 0; i < numFreqMask_; ++i) {
-      auto low = generateRandomInt(ignoredLowPassFilters_, rawWavNMels_ + 1);
+      auto low = generateRandomInt(ignoredLowPassFilters_, rawWavNMels_);
       auto high = generateRandomInt(low, std::min(rawWavNMels_, low + freqMaskF_) + 1); 
-      FL_LOG(INFO) << low << " low " << high << " high " << lowPassFilters_.size();
       if (high > low) {
-        FL_LOG(INFO) << "midlow " << input.dims();
         auto midLowWav = lowPassFilters_[high]->forward(inputForFilter); // todo check view
-        FL_LOG(INFO) << "low " << input.dims(); 
         auto lowWav = lowPassFilters_[low]->forward(inputForFilter);
-        FL_LOG(INFO) << "difference";
         output = output - fl::moddims(midLowWav - lowWav, input.dims());
       }
     }
@@ -159,7 +153,6 @@ Variable SpecAugment::forward(const Variable& input) {
     }
   }
 
-  FL_LOG(INFO) << "time masking";
   auto numTimeSteps = input.dims(0); // number of time steps
   // an upper bound on the time mask
   int T = std::min(timeMaskT_, static_cast<int>(numTimeSteps * timeMaskP_));
@@ -167,11 +160,9 @@ Variable SpecAugment::forward(const Variable& input) {
     for (int i = 0; i < numTimeMask_; ++i) {
       auto t = generateRandomInt(0, T);
       auto t0 = generateRandomInt(0, numTimeSteps - t);
-      FL_LOG(INFO) << "time masking " << t0 << " " << t0 + t << " | " << opArr.dims();
       opArr(af::seq(t0, t0 + t), af::span, af::span, af::span) = replaceVal;
     }
   }
-  FL_LOG(INFO) << "time masking done";
   return output;
 }
 
@@ -191,8 +182,8 @@ std::string SpecAugment::prettyString() const {
   ss << "mT: " << numTimeMask_ << ", ";
   ss << "useRawWav: " << useRawWav_ << ", ";
   ss << "rawWavNMels: " << rawWavNMels_ << ", ";
-  ss << "rawWavLowFreq: " << rawWavLowFreq_ << ", ";
-  ss << "rawWavHighFreq: " << rawWavHighFreq_ << ", ";
+  ss << "rawWavLowFreqHz: " << rawWavLowFreqHz_ << ", ";
+  ss << "rawWavHighFreqHz: " << rawWavHighFreqHz_ << ", ";
   ss << "rawWavSampleRate: " << rawWavSampleRate_;
   ss << " )";
   return ss.str();
